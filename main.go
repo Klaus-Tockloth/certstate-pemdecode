@@ -6,13 +6,14 @@ Description:
 - Decodes PEM-formatted certstate output.
 
 Releases:
-- 0.1.0 - 2018/10/01 : initial release
+- v0.1.0 - 2018/10/01 : initial release
+- v0.2.0 - 2019/11/04 : CRL support added
 
 Author:
 - Klaus Tockloth
 
 Copyright and license:
-- Copyright (c) 2018 Klaus Tockloth
+- Copyright (c) 2018, 2019 Klaus Tockloth
 - MIT license
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software
@@ -37,7 +38,7 @@ Remarks:
 - NN
 
 Links:
-- NN
+- https://github.com/Klaus-Tockloth/certstate
 */
 
 package main
@@ -57,8 +58,8 @@ import (
 // general program info
 var (
 	progName    = os.Args[0]
-	progVersion = "0.1.0"
-	progDate    = "2018/10/01"
+	progVersion = "v0.2.0"
+	progDate    = "2019/11/04"
 	progPurpose = "PEM decode"
 	progInfo    = "Decodes PEM-formatted certstate output."
 )
@@ -73,6 +74,7 @@ var separator = "\n-------------------------------------------------------------
 var (
 	opensslCertificate = "openssl x509 -certopt ext_dump -text -noout -inform PEM -in %s"
 	opensslOCSPResonse = "openssl ocsp -text -noverify -respin %s"
+	opensslCRL         = "openssl crl -text -noout -inform PEM -in %s"
 )
 
 /*
@@ -107,6 +109,7 @@ func main() {
 	fmt.Printf("  Input File         : %s\n", inputFile)
 	fmt.Printf("  Output Certificate : %s\n", fmt.Sprintf(opensslCertificate, "tempfile"))
 	fmt.Printf("  Output OCSPResonse : %s\n", fmt.Sprintf(opensslOCSPResonse, "tempfile"))
+	fmt.Printf("  Output CRL         : %s\n", fmt.Sprintf(opensslCRL, "tempfile"))
 
 	// read file into []byte
 	pemContent, err := ioutil.ReadFile(inputFile)
@@ -152,12 +155,13 @@ func printUsage() {
 
 	fmt.Printf("\nArgument:\n")
 	fmt.Printf("  file\n")
-	fmt.Printf("        certstate output file with PEM-formatted  (verbose) data objects\n")
+	fmt.Printf("        certstate output file with PEM-formatted (verbose) data objects\n")
 
 	fmt.Printf("\nOpenSSL output commands:\n"+
 		"  Certificate   : %s\n"+
-		"  OCSP response : %s\n",
-		fmt.Sprintf(opensslCertificate, "tempfile"), fmt.Sprintf(opensslOCSPResonse, "tempfile"))
+		"  OCSP response : %s\n"+
+		"  CRL           : %s\n",
+		fmt.Sprintf(opensslCertificate, "tempfile"), fmt.Sprintf(opensslOCSPResonse, "tempfile"), fmt.Sprintf(opensslCRL, "tempfile"))
 
 	fmt.Printf("\n")
 	os.Exit(1)
@@ -173,6 +177,8 @@ func printPEM(pemBlock *pem.Block) {
 		printCertificatePEM(pemBlock)
 	case "OCSP RESPONSE":
 		printOCSPResponsePEM(pemBlock)
+	case "X509 CRL":
+		printCRLPEM(pemBlock)
 	default:
 		fmt.Printf("\nPEM type <%v> not supported.\n", pemBlock.Type)
 	}
@@ -239,6 +245,40 @@ func printOCSPResponsePEM(pemBlock *pem.Block) {
 
 	// decode DER data into TEXT format
 	command := fmt.Sprintf(opensslOCSPResonse, tmpfile.Name())
+	_, commandOutput, err := runCommand(command)
+	if err != nil {
+		log.Printf("error <%v> at runCommand()", err)
+	}
+	fmt.Printf("%s\n", string(commandOutput))
+}
+
+/*
+printCRLPEM prints a single PEM data block
+*/
+func printCRLPEM(pemBlock *pem.Block) {
+
+	// encode PEM data again into PEM format
+	var pemCertificate bytes.Buffer
+	if err := pem.Encode(&pemCertificate, pemBlock); err != nil {
+		log.Fatalf("error <%v> at pem.Encode()", err)
+	}
+	fmt.Printf("%s\n", pemCertificate.String())
+
+	tmpfile, err := ioutil.TempFile("", "CRL_PEM_Tempfile_")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write([]byte(pemCertificate.String())); err != nil {
+		log.Fatalf("error <%v> at tmpfile.Write(); file = <%v>", err, tmpfile.Name())
+	}
+	if err := tmpfile.Close(); err != nil {
+		log.Fatalf("error <%v> at tmpfile.Close(); file = <%v>", err, tmpfile.Name())
+	}
+
+	// decode PEM data into TEXT format
+	command := fmt.Sprintf(opensslCRL, tmpfile.Name())
 	_, commandOutput, err := runCommand(command)
 	if err != nil {
 		log.Printf("error <%v> at runCommand()", err)
